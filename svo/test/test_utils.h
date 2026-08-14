@@ -19,6 +19,7 @@
 
 #include <string.h>
 #include <cstdlib> // for getenv
+#include <stdexcept>
 #ifdef SVO_USE_ROS
 # include <ros/package.h>
 # include <vikit/params_helper.h>
@@ -36,6 +37,8 @@ std::string getDatasetDir()
     dataset_dir = std::string(env_dir);
   return dataset_dir;
 #else
+  if(env_dir == NULL)
+    throw std::runtime_error("SVO_DATASET_DIR environment variable is not set");
   return std::string(env_dir);
 #endif
 }
