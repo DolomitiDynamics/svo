@@ -15,11 +15,10 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <algorithm>
+#include <cmath>
 #include <vikit/math_utils.h>
 #include <vikit/abstract_camera.h>
 #include <vikit/vision.h>
-#include <boost/bind.hpp>
-#include <boost/math/distributions/normal.hpp>
 #include <svo/global.h>
 #include <svo/depth_filter.h>
 #include <svo/frame.h>
@@ -50,6 +49,7 @@ DepthFilter::DepthFilter(feature_detection::DetectorPtr feature_detector, callba
     seed_converged_cb_(seed_converged_cb),
     seeds_updating_halt_(false),
     thread_(NULL),
+    stop_requested_(false),
     new_keyframe_set_(false),
     new_keyframe_min_depth_(0.0),
     new_keyframe_mean_depth_(0.0)
@@ -63,7 +63,7 @@ DepthFilter::~DepthFilter()
 
 void DepthFilter::startThread()
 {
-  thread_ = new boost::thread(&DepthFilter::updateSeedsLoop, this);
+  thread_ = new std::thread(&DepthFilter::updateSeedsLoop, this);
 }
 
 void DepthFilter::stopThread()
@@ -73,8 +73,13 @@ void DepthFilter::stopThread()
   {
     SVO_INFO_STREAM("DepthFilter interrupt and join thread... ");
     seeds_updating_halt_ = true;
-    thread_->interrupt();
+    stop_requested_ = true;
+    {
+      lock_t lock(frame_queue_mut_);
+      frame_queue_cond_.notify_all();
+    }
     thread_->join();
+    delete thread_;
     thread_ = NULL;
   }
 }
@@ -168,13 +173,15 @@ void DepthFilter::reset()
 
 void DepthFilter::updateSeedsLoop()
 {
-  while(!boost::this_thread::interruption_requested())
+  while(!stop_requested_)
   {
     FramePtr frame;
     {
       lock_t lock(frame_queue_mut_);
-      while(frame_queue_.empty() && new_keyframe_set_ == false)
+      while(frame_queue_.empty() && new_keyframe_set_ == false && !stop_requested_)
         frame_queue_cond_.wait(lock);
+      if(stop_requested_)
+        return;
       if(new_keyframe_set_)
       {
         new_keyframe_set_ = false;
@@ -311,10 +318,11 @@ void DepthFilter::updateSeed(const float x, const float tau2, Seed* seed)
   float norm_scale = sqrt(seed->sigma2 + tau2);
   if(std::isnan(norm_scale))
     return;
-  boost::math::normal_distribution<float> nd(seed->mu, norm_scale);
   float s2 = 1./(1./seed->sigma2 + 1./tau2);
   float m = s2*(seed->mu/seed->sigma2 + x/tau2);
-  float C1 = seed->a/(seed->a+seed->b) * boost::math::pdf(nd, x);
+  const float diff = (x - seed->mu) / norm_scale;
+  const float normal_pdf = std::exp(-0.5f*diff*diff) / (norm_scale*std::sqrt(2.f*static_cast<float>(M_PI)));
+  float C1 = seed->a/(seed->a+seed->b) * normal_pdf;
   float C2 = seed->b/(seed->a+seed->b) * 1./seed->z_range;
   float normalization_constant = C1 + C2;
   C1 /= normalization_constant;

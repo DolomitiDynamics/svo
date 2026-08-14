@@ -17,7 +17,7 @@
 #include <vikit/abstract_camera.h>
 #include <stdlib.h>
 #include <Eigen/StdVector>
-#include <boost/bind.hpp>
+#include <mutex>
 #include <fstream>
 #include <svo/frame_handler_base.h>
 #include <svo/config.h>
@@ -123,7 +123,7 @@ int FrameHandlerBase::finishFrameProcessingCommon(
 #ifdef SVO_TRACE
   g_permon->writeToFile();
   {
-    boost::unique_lock<boost::mutex> lock(map_.point_candidates_.mut_);
+    std::unique_lock<std::mutex> lock(map_.point_candidates_.mut_);
     size_t n_candidates = map_.point_candidates_.candidates_.size();
     SVO_LOG(n_candidates);
   }

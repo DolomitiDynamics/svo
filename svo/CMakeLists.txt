@@ -18,7 +18,7 @@ SET(DEBUG_OUTPUT FALSE) # Only relevant if build without ROS
 
 SET(PROJECT_NAME svo)
 PROJECT(${PROJECT_NAME})
-CMAKE_MINIMUM_REQUIRED (VERSION 2.8.3)
+CMAKE_MINIMUM_REQUIRED (VERSION 3.10)
 SET(CMAKE_BUILD_TYPE Release) # Release, RelWithDebInfo
 SET(CMAKE_VERBOSE_MAKEFILE OFF)
 SET(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${PROJECT_SOURCE_DIR}/CMakeModules/")
@@ -52,9 +52,9 @@ ELSE()
 ENDIF()
 SET(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS} -O3 -fsee -fomit-frame-pointer -fno-signed-zeros -fno-math-errno -funroll-loops")
 
-# Add plain cmake packages 
+# Add plain cmake packages
 FIND_PACKAGE(OpenCV REQUIRED)
-FIND_PACKAGE(Boost REQUIRED COMPONENTS thread)
+FIND_PACKAGE(Threads REQUIRED)
 
 add_subdirectory(external/eigen)
 add_subdirectory(external)
@@ -65,16 +65,15 @@ INCLUDE_DIRECTORIES(
   include
   ${OpenCV_INCLUDE_DIRS}
   ${Sophus_INCLUDE_DIRS}
-  ${Boost_INCLUDE_DIRS}
   external/fast/include
 )
 
 # Set link libraries
-LIST(APPEND LINK_LIBS 
+LIST(APPEND LINK_LIBS
   ${OpenCV_LIBS}
   vikit_sophus
   eigen
-  ${Boost_LIBRARIES}
+  Threads::Threads
   fast
 )
 

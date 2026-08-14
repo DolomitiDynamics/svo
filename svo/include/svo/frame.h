@@ -20,7 +20,6 @@
 #include <sophus/se3.h>
 #include <vikit/math_utils.h>
 #include <vikit/abstract_camera.h>
-#include <boost/noncopyable.hpp>
 #include <svo/global.h>
 
 namespace g2o {
@@ -37,7 +36,7 @@ typedef list<Feature*> Features;
 typedef vector<cv::Mat> ImgPyr;
 
 /// A frame saves the image, the associated features and the estimated pose.
-class Frame : boost::noncopyable
+class Frame : NonCopyable
 {
 public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW

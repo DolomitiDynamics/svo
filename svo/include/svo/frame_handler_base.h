@@ -20,9 +20,6 @@
 #include <queue>
 #include <vikit/timer.h>
 #include <vikit/ringbuffer.h>
-#include <boost/noncopyable.hpp>
-#include <boost/function.hpp>
-#include <boost/thread.hpp>
 #include <svo/global.h>
 #include <svo/map.h>
 
@@ -39,7 +36,7 @@ class Matcher;
 class DepthFilter;
 
 /// Base class for various VO pipelines. Manages the map and the state machine.
-class FrameHandlerBase : boost::noncopyable
+class FrameHandlerBase : NonCopyable
 {
 public:
   enum Stage {

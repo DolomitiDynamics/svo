@@ -20,6 +20,7 @@
 #include <list>
 #include <vector>
 #include <string>
+#include <memory>
 #include <stdint.h>
 #include <stdio.h>
 #include <math.h>
@@ -28,7 +29,6 @@
 #include <opencv2/opencv.hpp>
 #include <sophus/se3.h>
 #include <vikit/performance_monitor.h>
-#include <boost/shared_ptr.hpp>
 #include<Eigen/StdVector>
 #ifndef RPG_SVO_VIKIT_IS_VECTOR_SPECIALIZED //Guard for rpg_vikit
 #define RPG_SVO_VIKIT_IS_VECTOR_SPECIALIZED
@@ -95,7 +95,17 @@ namespace svo
 #endif
 
   class Frame;
-  typedef boost::shared_ptr<Frame> FramePtr;
+  typedef std::shared_ptr<Frame> FramePtr;
+
+  /// Inherit from this class to make a class non-copyable (replaces boost::noncopyable).
+  class NonCopyable
+  {
+  protected:
+    NonCopyable() = default;
+    ~NonCopyable() = default;
+    NonCopyable(const NonCopyable&) = delete;
+    NonCopyable& operator=(const NonCopyable&) = delete;
+  };
 } // namespace svo
 
 #endif // SVO_GLOBAL_H_

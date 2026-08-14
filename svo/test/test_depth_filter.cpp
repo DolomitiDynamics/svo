@@ -17,9 +17,7 @@
 #include <list>
 #include <vector>
 #include <string>
-#include <boost/bind.hpp>
-#include <boost/make_shared.hpp>
-#include <boost/shared_ptr.hpp>
+#include <memory>
 #include <vikit/pinhole_camera.h>
 #include <vikit/abstract_camera.h>
 #include <vikit/atan_camera.h>
@@ -108,7 +106,8 @@ void DepthFilterTest::testReconstruction(
   svo::feature_detection::DetectorPtr feature_detector(
       new svo::feature_detection::FastDetector(
           cam_->width(), cam_->height(), svo::Config::gridSize(), svo::Config::nPyrLevels()));
-  svo::DepthFilter::callback_t depth_filter_cb = boost::bind(&DepthFilterTest::depthFilterCb, this, _1, _2);
+  svo::DepthFilter::callback_t depth_filter_cb =
+      [this](svo::Point* point, double depth_sigma2){ depthFilterCb(point, depth_sigma2); };
   depth_filter_ = new svo::DepthFilter(feature_detector, depth_filter_cb);
   depth_filter_->options_.verbose = true;
 
@@ -123,7 +122,7 @@ void DepthFilterTest::testReconstruction(
     if(i == 0)
     {
       // create reference frame and load ground truth depthmap
-      frame_ref_ = boost::make_shared<svo::Frame>(cam_, img, 0.0);
+      frame_ref_ = std::make_shared<svo::Frame>(cam_, img, 0.0);
       frame_ref_->T_f_w_ = T_w_f.inverse();
       depth_filter_->addKeyframe(frame_ref_, 2, 0.5);
       vk::blender_utils::loadBlenderDepthmap(dataset_dir+"/depth/" + (*it).image_name_ + "_0.depth", *cam_, depth_ref_);
@@ -131,7 +130,7 @@ void DepthFilterTest::testReconstruction(
     }
 
     n_converged_seeds_ = 0;
-    frame_cur_ = boost::make_shared<svo::Frame>(cam_, img, 0.0);
+    frame_cur_ = std::make_shared<svo::Frame>(cam_, img, 0.0);
     frame_cur_->T_f_w_ = T_w_f.inverse();
     depth_filter_->addFrame(frame_cur_);
     n_converged_per_iteration.push_back(n_converged_seeds_);

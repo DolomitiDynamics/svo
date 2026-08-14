@@ -23,8 +23,7 @@
 #include <svo/feature.h>
 #include <svo/map.h>
 #include <svo/config.h>
-#include <boost/bind.hpp>
-#include <boost/thread.hpp>
+#include <mutex>
 #include <vikit/abstract_camera.h>
 #include <vikit/math_utils.h>
 #include <vikit/timer.h>
@@ -75,8 +74,9 @@ void Reprojector::reprojectMap(
   map_.getCloseKeyframes(frame, close_kfs);
 
   // Sort KFs with overlap according to their closeness
-  close_kfs.sort(boost::bind(&std::pair<FramePtr, double>::second, _1) <
-                 boost::bind(&std::pair<FramePtr, double>::second, _2));
+  close_kfs.sort([](const std::pair<FramePtr, double>& lhs, const std::pair<FramePtr, double>& rhs){
+                   return lhs.second < rhs.second;
+                 });
 
   // Reproject all mappoints of the closest N kfs with overlap. We only store
   // in which grid cell the points fall.
@@ -109,7 +109,7 @@ void Reprojector::reprojectMap(
   // Now project all point candidates
   SVO_START_TIMER("reproject_candidates");
   {
-    boost::unique_lock<boost::mutex> lock(map_.point_candidates_.mut_);
+    std::unique_lock<std::mutex> lock(map_.point_candidates_.mut_);
     auto it=map_.point_candidates_.candidates_.begin();
     while(it!=map_.point_candidates_.candidates_.end())
     {
@@ -152,7 +152,7 @@ bool Reprojector::pointQualityComparator(Candidate& lhs, Candidate& rhs)
 
 bool Reprojector::reprojectCell(Cell& cell, FramePtr frame)
 {
-  cell.sort(boost::bind(&Reprojector::pointQualityComparator, _1, _2));
+  cell.sort(Reprojector::pointQualityComparator);
   Cell::iterator it=cell.begin();
   while(it!=cell.end())
   {

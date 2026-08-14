@@ -17,7 +17,6 @@
 #ifndef SVO_POINT_H_
 #define SVO_POINT_H_
 
-#include <boost/noncopyable.hpp>
 #include <svo/global.h>
 
 namespace g2o {
@@ -32,7 +31,7 @@ class Feature;
 typedef Matrix<double, 2, 3> Matrix23d;
 
 /// A 3D point on the surface of the scene.
-class Point : boost::noncopyable
+class Point : NonCopyable
 {
 public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW

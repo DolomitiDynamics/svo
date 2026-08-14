@@ -80,7 +80,7 @@ protected:
     return (scale*y)/cell_size_*grid_n_cols_ + (scale*x)/cell_size_;
   }
 };
-typedef boost::shared_ptr<AbstractDetector> DetectorPtr;
+typedef std::shared_ptr<AbstractDetector> DetectorPtr;
 
 /// FAST detector by Edward Rosten.
 class FastDetector : public AbstractDetector
