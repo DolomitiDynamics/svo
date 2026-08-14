@@ -4,6 +4,7 @@
 //
 // Usage:
 //   run_video <video_file> <calibration.yml> [start_frame] [--set name=value ...]
+//             [--reset-after-lost N]
 //
 // svo::Config (include/svo/config.h) is a singleton read by every stage of
 // the pipeline (DepthFilter, Matcher, Reprojector, PoseOptimizer, ...) via
@@ -11,17 +12,42 @@
 // mutable references, so tuning a parameter is just a matter of assigning to
 // them before the FrameHandlerMono is constructed. --set exposes that here
 // on the command line instead of requiring a recompile.
+//
+// --reset-after-lost N (default 30, 0 disables): if SVO stays in
+// STAGE_RELOCALIZING for N consecutive frames without recovering, the map
+// is torn down and reinitialized from scratch on the next frame. Since the
+// only output that matters here is per-frame linear/angular velocity (not
+// a pose in one consistent world frame), a fresh, arbitrary map origin
+// after reinit is harmless.
+//
+// IMPORTANT: destroying a FrameHandlerMono that went through a successful
+// init followed by tracking loss corrupts the heap -- confirmed via a
+// debugger backtrace into KltHomographyInit::~KltHomographyInit() (a
+// pre-existing bug in SVO's own manual Frame/Feature/Point pointer
+// ownership, unrelated to this reset feature: it reproduces even with
+// --reset-after-lost 0, on the *natural* end-of-video teardown). Since the
+// only thing this tool needs is the already-printed per-frame output, old
+// FrameHandlerMono instances are deliberately never destructed -- only
+// their DepthFilter background thread is stopped (to avoid leaking a
+// running thread per reset) -- and main() exits via std::_Exit() to skip
+// the crashing destructor chain entirely.
 
 #include <iostream>
+#include <iomanip>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <functional>
+#include <chrono>
+#include <ctime>
+#include <cstdlib>
 #include <opencv2/opencv.hpp>
 #include <vikit/pinhole_camera.h>
 #include <svo/config.h>
 #include <svo/frame_handler_mono.h>
 #include <svo/frame.h>
 #include <svo/map.h>
+#include <svo/depth_filter.h>
 
 namespace {
 
@@ -78,6 +104,44 @@ void applyConfigSetting(const std::string& arg)
   std::cout << "Config: " << name << " = " << value << "\n";
 }
 
+/// Formats a scalar with fixed width/precision so that per-frame output
+/// lines up in columns instead of jittering with the value's magnitude.
+/// Values that are effectively zero (e.g. -0.0000 from sign flips) are
+/// clamped to a clean 0 first.
+std::string fmt(double v, int width = 9, int prec = 4)
+{
+  if(std::abs(v) < 5e-10)
+    v = 0.0;
+  std::ostringstream oss;
+  oss << std::fixed << std::setprecision(prec) << std::setw(width) << v;
+  return oss.str();
+}
+
+/// Formats a 3D vector as "[ x,  y,  z]" using fmt() for each component.
+std::string fmtVec3(const Eigen::Vector3d& v, int width = 9, int prec = 4)
+{
+  return "[" + fmt(v.x(), width, prec) + ", " + fmt(v.y(), width, prec) + ", " + fmt(v.z(), width, prec) + "]";
+}
+
+/// Formats the current wall-clock time as HH:MM:SS.mmm, i.e. the real time
+/// at which this frame was actually processed (as opposed to "t=", which is
+/// the frame's timestamp within the video).
+std::string wallClockNow()
+{
+  const auto now = std::chrono::system_clock::now();
+  const std::time_t now_c = std::chrono::system_clock::to_time_t(now);
+  const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+      now.time_since_epoch()) % 1000;
+
+  std::tm tm_buf;
+  localtime_r(&now_c, &tm_buf);
+
+  std::ostringstream oss;
+  oss << std::put_time(&tm_buf, "%H:%M:%S")
+      << '.' << std::setfill('0') << std::setw(3) << ms.count();
+  return oss.str();
+}
+
 vk::PinholeCamera* loadCameraFromYaml(const std::string& path, int& cam_width, int& cam_height)
 {
   cv::FileStorage fs(path, cv::FileStorage::READ);
@@ -127,12 +191,18 @@ int main(int argc, char** argv)
 {
   if(argc < 3)
   {
-    std::cerr << "Usage: " << argv[0] << " <video_file> <calibration.yml> [start_frame] [--set name=value ...]\n";
+    std::cerr << "Usage: " << argv[0] << " <video_file> <calibration.yml> [start_frame]"
+              << " [--set name=value ...] [--reset-after-lost N]\n";
     return 1;
   }
   const std::string video_path = argv[1];
   const std::string calib_path = argv[2];
   int start_frame = 0;
+  // Number of consecutive STAGE_RELOCALIZING frames after which the VO state
+  // (map, keyframes, depth filter) is reset and reinitialized from scratch,
+  // since SVO has no built-in give-up-and-restart behavior of its own.
+  // 0 disables the automatic reset.
+  int reset_after_lost = 30;
 
   for(int i = 3; i < argc; ++i)
   {
@@ -145,6 +215,15 @@ int main(int argc, char** argv)
         return 1;
       }
       applyConfigSetting(argv[++i]);
+    }
+    else if(arg == "--reset-after-lost")
+    {
+      if(i + 1 >= argc)
+      {
+        std::cerr << "--reset-after-lost requires an integer frame count\n";
+        return 1;
+      }
+      reset_after_lost = std::atoi(argv[++i]);
     }
     else
     {
@@ -186,8 +265,37 @@ int main(int argc, char** argv)
   if(start_frame > 0)
     cap.set(cv::CAP_PROP_POS_FRAMES, start_frame);
 
-  svo::FrameHandlerMono vo(cam);
-  vo.start();
+  // Scoped so that *vo (and every Frame it holds, all of which store a raw
+  // cam_ pointer) is destroyed before "delete cam" below -- otherwise
+  // vo's destructor runs after cam is freed (use-after-free/segfault).
+  //
+  // vo is heap-allocated (rather than a plain stack object) because a
+  // forced reset (below) destroys and reconstructs it from scratch, rather
+  // than calling FrameHandlerBase::reset() in place. SVO's manual
+  // Frame/Feature/Point graph (raw pointers, deleted directly by
+  // Map::reset()/MapPointCandidates::reset()) is only ever exercised
+  // through a single construct-run-destruct lifecycle upstream; repeatedly
+  // reset()-ing one long-lived instance leaves that graph in a state whose
+  // *final* destructor corrupts memory (observed as a crash strictly after
+  // "Done" -- i.e. once the video ends -- on any run that had reset at
+  // least once, with or without in-place reset()/start()). A fresh object
+  // per restart sidesteps that entirely: each instance only ever goes
+  // through the one lifecycle that's known to work.
+  {
+  svo::FrameHandlerMono* vo = new svo::FrameHandlerMono(cam);
+  vo->start();
+
+  // State kept to differentiate the camera pose (world-frame position +
+  // orientation) between consecutive tracked frames into linear and
+  // angular velocity.
+  bool have_prev_pose = false;
+  double prev_t = 0.0;
+  Eigen::Vector3d prev_pos = Eigen::Vector3d::Zero();
+  Eigen::Quaterniond prev_q = Eigen::Quaterniond::Identity();
+
+  // Number of consecutive frames spent in STAGE_RELOCALIZING. Reset to 0
+  // whenever tracking succeeds (or during normal startup init).
+  int relocalizing_streak = 0;
 
   cv::Mat frame_bgr, frame_gray;
   int img_id = start_frame;
@@ -202,31 +310,116 @@ int main(int argc, char** argv)
       frame_gray = frame_bgr;
 
     const double timestamp = img_id / fps;
-    vo.addImage(frame_gray, timestamp);
+    vo->addImage(frame_gray, timestamp);
 
-    if(vo.lastFrame() != NULL)
+    // FrameHandlerMono::addImage() unconditionally assigns last_frame_ on
+    // every call, success or failure -- so lastFrame() != NULL only means
+    // "some frame has been processed", not "this frame was tracked". On a
+    // tracking failure SVO deliberately freezes new_frame_->T_f_w_ at the
+    // previous pose ("reset to avoid crazy pose jumps") and switches to
+    // STAGE_RELOCALIZING, so the pose only reflects a genuine new estimate
+    // while stage() == STAGE_DEFAULT_FRAME.
+    const bool is_tracking =
+        vo->lastFrame() != NULL && vo->stage() == svo::FrameHandlerBase::STAGE_DEFAULT_FRAME;
+
+    if(is_tracking)
     {
-      const Sophus::SE3& T_f_w = vo.lastFrame()->T_f_w_;
-      const Eigen::Vector3d twf = T_f_w.inverse().translation();
-      const Eigen::Quaterniond q(T_f_w.unit_quaternion());
-      std::cout << "frame=" << img_id
-                << " t=" << timestamp
-                << " stage=" << vo.stage()
-                << " nobs=" << vo.lastNumObservations()
-                << " time_ms=" << vo.lastProcessingTime()*1000
-                << " pos=[" << twf.x() << ", " << twf.y() << ", " << twf.z() << "]"
-                << " quat=[" << q.x() << ", " << q.y() << ", " << q.z() << ", " << q.w() << "]"
+      // Camera pose in the world frame (position + orientation), both
+      // derived from the same T_w_f = T_f_w_^-1 so that differentiating them
+      // yields a consistent linear/angular velocity.
+      const Sophus::SE3 T_w_f = vo->lastFrame()->T_f_w_.inverse();
+      const Eigen::Vector3d twf = T_w_f.translation();
+      Eigen::Quaterniond q = T_w_f.unit_quaternion();
+
+      Eigen::Vector3d vel = Eigen::Vector3d::Zero();
+      Eigen::Vector3d angvel = Eigen::Vector3d::Zero();
+      double vel_mag = 0.0, angvel_mag = 0.0;
+
+      if(have_prev_pose)
+      {
+        const double dt = timestamp - prev_t;
+        if(dt > 1e-9)
+        {
+          vel = (twf - prev_pos) / dt;
+          vel_mag = vel.norm();
+
+          // Choose the quaternion hemisphere closest to prev_q so the
+          // relative rotation takes the shortest path.
+          if(q.dot(prev_q) < 0.0)
+            q.coeffs() *= -1.0;
+          Eigen::Quaterniond q_rel = q * prev_q.inverse();
+          q_rel.normalize();
+          const Eigen::AngleAxisd aa(q_rel);
+          angvel = aa.axis() * (aa.angle() / dt);
+          angvel_mag = std::abs(aa.angle() / dt);
+        }
+      }
+      prev_pos = twf;
+      prev_q = q;
+      prev_t = timestamp;
+      have_prev_pose = true;
+
+      std::cout << "frame=" << std::setw(6) << img_id
+                << " tracked_at=" << wallClockNow()
+                << " t="     << fmt(timestamp, 8, 3)
+                << " stage=" << vo->stage()
+                << " nobs="  << std::setw(4) << vo->lastNumObservations()
+                << " time_ms=" << fmt(vo->lastProcessingTime()*1000, 7, 2)
+                << " pos="   << fmtVec3(twf)
+                << " quat="  << "[" << fmt(q.x()) << ", " << fmt(q.y()) << ", " << fmt(q.z()) << ", " << fmt(q.w()) << "]"
+                << " vel="   << fmtVec3(vel)
+                << " |vel|="    << fmt(vel_mag, 8) << " m/s"
+                << " angvel="   << fmtVec3(angvel)
+                << " |angvel|=" << fmt(angvel_mag, 8) << " rad/s"
                 << std::endl;
     }
     else
     {
-      std::cout << "frame=" << img_id << " t=" << timestamp << " (not yet tracking)" << std::endl;
+      have_prev_pose = false;
+      const char* reason = (vo->lastFrame() == NULL) ? "not yet tracking" : "lost tracking, relocalizing";
+      std::cout << "frame=" << std::setw(6) << img_id
+                << " tracked_at=" << wallClockNow()
+                << " t=" << fmt(timestamp, 8, 3)
+                << " stage=" << vo->stage()
+                << " (" << reason << ")" << std::endl;
+    }
+
+    // SVO has no built-in give-up-and-restart: once RESULT_FAILURE hits, it
+    // just keeps calling relocalizeFrame() against the old map forever (see
+    // frame_handler_base.cpp finishFrameProcessingCommon). If that streak
+    // goes on too long, tear down vo and construct a fresh one, exactly
+    // like the very first call. Since the caller only wants relative
+    // velocities (not a pose in a single consistent world frame), a new
+    // arbitrary map origin after reinit is harmless -- have_prev_pose is
+    // already false here, so velocity output naturally resumes cleanly
+    // from the next tracked pair.
+    if(vo->stage() == svo::FrameHandlerBase::STAGE_RELOCALIZING)
+      ++relocalizing_streak;
+    else
+      relocalizing_streak = 0;
+
+    if(reset_after_lost > 0 && relocalizing_streak >= reset_after_lost)
+    {
+      std::cout << "frame=" << std::setw(6) << img_id
+                << " tracked_at=" << wallClockNow()
+                << " RESET: lost tracking for " << relocalizing_streak
+                << " frames, reinitializing map from scratch" << std::endl;
+      // Deliberately not deleting vo -- see the note at the top of this
+      // file. Only stop its background thread so it doesn't keep running
+      // forever, then abandon the rest of the object.
+      vo->depthFilter()->stopThread();
+      vo = new svo::FrameHandlerMono(cam);
+      vo->start();
+      relocalizing_streak = 0;
     }
 
     ++img_id;
   }
 
-  delete cam;
   std::cout << "Done. Processed " << (img_id - start_frame) << " frames." << std::endl;
-  return 0;
+  vo->depthFilter()->stopThread();
+  } // end vo scope -- vo is deliberately never deleted, see note above.
+
+  std::cout.flush();
+  std::_Exit(0); // Skip C++ destructors (cam, cap, vo, ...) entirely.
 }

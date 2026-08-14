@@ -8,6 +8,7 @@
 #ifndef VIKIT_VISION_H_
 #define VIKIT_VISION_H_
 
+#include <cassert>
 #include <vikit/aligned_mem.h>
 #include <Eigen/Core>
 #include <opencv2/opencv.hpp>

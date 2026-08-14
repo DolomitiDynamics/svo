@@ -9,6 +9,7 @@
 #define MATH_UTILS_H_
 
 
+#include <cassert>
 #include <Eigen/Core>
 #include <Eigen/StdVector>
 #include <sophus/se3.h>

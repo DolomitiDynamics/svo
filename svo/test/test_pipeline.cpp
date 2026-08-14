@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+#include <cassert>
 #include <svo/config.h>
 #include <svo/frame_handler_mono.h>
 #include <svo/map.h>

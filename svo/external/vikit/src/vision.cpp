@@ -5,6 +5,7 @@
  *      Author: cforster
  */
 
+#include <cassert>
 #include <vikit/vision.h>
 
 #if __SSE2__

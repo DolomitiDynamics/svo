@@ -21,6 +21,7 @@
 #ifndef VIKIT_FILE_READER_H_
 #define VIKIT_FILE_READER_H_
 
+#include <cassert>
 #include <fstream>
 #include <vector>
 

@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+#include <cassert>
 #include <algorithm>
 #include <cmath>
 #include <vikit/math_utils.h>
@@ -162,9 +163,11 @@ void DepthFilter::reset()
     lock_t lock(seeds_mut_);
     seeds_.clear();
   }
-  lock_t lock();
-  while(!frame_queue_.empty())
-    frame_queue_.pop();
+  {
+    lock_t lock(frame_queue_mut_);
+    while(!frame_queue_.empty())
+      frame_queue_.pop();
+  }
   seeds_updating_halt_ = false;
 
   if(options_.verbose)

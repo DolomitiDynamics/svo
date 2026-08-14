@@ -286,12 +286,21 @@ bool FrameHandlerMono::relocalizeFrameAtPose(
 
 void FrameHandlerMono::resetAll()
 {
+  // DepthFilter's background thread holds raw pointers into the very
+  // Frame/Feature/Point graph that resetCommon() (via map_.reset()) is
+  // about to tear down (each Seed keeps a raw Feature* whose ->frame is a
+  // raw pointer into a Frame that map_.reset() may destroy). Stop the
+  // thread first so that teardown happens without a concurrent reader,
+  // then restart it once the map (and the depth filter's own state) are
+  // back to a clean, empty slate.
+  depth_filter_->stopThread();
   resetCommon();
   last_frame_.reset();
   new_frame_.reset();
   core_kfs_.clear();
   overlap_kfs_.clear();
   depth_filter_->reset();
+  depth_filter_->startThread();
 }
 
 void FrameHandlerMono::setFirstFrame(const FramePtr& first_frame)
