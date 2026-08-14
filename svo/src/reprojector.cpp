@@ -15,6 +15,7 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <algorithm>
+#include <random>
 #include <stdexcept>
 #include <svo/reprojector.h>
 #include <svo/frame.h>
@@ -51,7 +52,8 @@ void Reprojector::initializeGrid(vk::AbstractCamera* cam)
   grid_.cell_order.resize(grid_.cells.size());
   for(size_t i=0; i<grid_.cells.size(); ++i)
     grid_.cell_order[i] = i;
-  random_shuffle(grid_.cell_order.begin(), grid_.cell_order.end()); // maybe we should do it at every iteration!
+  static std::mt19937 rng(std::random_device{}());
+  std::shuffle(grid_.cell_order.begin(), grid_.cell_order.end(), rng); // maybe we should do it at every iteration!
 }
 
 void Reprojector::resetGrid()

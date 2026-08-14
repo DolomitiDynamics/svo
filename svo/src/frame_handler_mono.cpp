@@ -27,6 +27,8 @@
 #ifdef USE_BUNDLE_ADJUSTMENT
 #include <svo/bundle_adjustment.h>
 #endif
+#include <boost/bind.hpp>
+using namespace boost::placeholders;
 
 namespace svo {
 

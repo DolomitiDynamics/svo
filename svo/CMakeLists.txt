@@ -1,10 +1,18 @@
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_CXX_STANDARD_REQUIRED True)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -g -Wall -Wextra -Werror -fPIC")
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -DNDEBUG -w -fPIC")
+
 ################################################################################
 # user build settings
 
 SET(TRACE TRUE)
 SET(HAVE_G2O FALSE) 
-SET(USE_ROS TRUE) # Set FALSE if you want to build this package without Catkin
+SET(USE_ROS FALSE) # Set FALSE if you want to build this package without Catkin
 SET(DEBUG_OUTPUT FALSE) # Only relevant if build without ROS
+
 
 ################################################################################
 
@@ -46,50 +54,29 @@ SET(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS} -O3 -fsee -fomit-frame-pointer -
 
 # Add plain cmake packages 
 FIND_PACKAGE(OpenCV REQUIRED)
-FIND_PACKAGE(Eigen REQUIRED)
-FIND_PACKAGE(Sophus REQUIRED)
-FIND_PACKAGE(fast REQUIRED)
-FIND_PACKAGE(Boost REQUIRED COMPONENTS thread system)
+FIND_PACKAGE(Boost REQUIRED COMPONENTS thread)
 
-IF(USE_ROS)
-  FIND_PACKAGE(catkin REQUIRED COMPONENTS roscpp roslib cmake_modules vikit_common vikit_ros)
-  catkin_package(
-      DEPENDS Eigen OpenCV Sophus Boost fast
-      CATKIN_DEPENDS roscpp roslib vikit_common vikit_ros
-      INCLUDE_DIRS include
-      LIBRARIES svo
-  )
-ELSE()
-  FIND_PACKAGE(vikit_common REQUIRED)
-  SET(EXECUTABLE_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/bin)
-  SET(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)
-ENDIF()
+add_subdirectory(external/eigen)
+add_subdirectory(external)
+add_subdirectory(external/fast)
 
 # Include dirs
 INCLUDE_DIRECTORIES(
   include
-  ${Eigen_INCLUDE_DIRS}
   ${OpenCV_INCLUDE_DIRS}
   ${Sophus_INCLUDE_DIRS}
   ${Boost_INCLUDE_DIRS}
-  ${fast_INCLUDE_DIRS}
+  external/fast/include
 )
 
 # Set link libraries
 LIST(APPEND LINK_LIBS 
   ${OpenCV_LIBS}
-  ${Sophus_LIBRARIES}
+  vikit_sophus
+  eigen
   ${Boost_LIBRARIES}
-  ${fast_LIBRARIES}
+  fast
 )
-
-IF(USE_ROS)
-  INCLUDE_DIRECTORIES(${catkin_INCLUDE_DIRS})
-  LIST(APPEND LINK_LIBS ${catkin_LIBRARIES})
-ELSE()
-  INCLUDE_DIRECTORIES(${vikit_common_INCLUDE_DIRS})
-  LIST(APPEND LINK_LIBS ${vikit_common_LIBRARIES})
-ENDIF()
 
 # Set sourcefiles
 LIST(APPEND SOURCEFILES

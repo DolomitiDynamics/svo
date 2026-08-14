@@ -1,0 +1,9 @@
+[submodule "svo/external/fast"]
+	path = svo/external/fast
+	url = https://github.com/uzh-rpg/fast.git
+[submodule "svo/external/Sophus"]
+	path = svo/external/Sophus
+	url = https://github.com/strasdat/Sophus.git
+[submodule "svo/external/eigen"]
+	path = svo/external/eigen
+	url = https://gitlab.com/libeigen/eigen.git
